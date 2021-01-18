@@ -18,6 +18,15 @@
 const { readFileSync } = require('fs');
 const jwt = require('jsonwebtoken');
 const mqtt = require('mqtt');
+const lit = require('lit-illumination-technology');
+
+const mqttBridgeHostname = 'mqtt.googleapis.com';
+const mqttBridgePort = 8883;
+const algorithm = `RS256`;
+const projectId = 'lit-illumination-technology';
+const region = 'us-central1';
+const registryId = 'lights';
+
 // [END iot_mqtt_include]
 
 // Create a Cloud IoT Core JWT for the given project id, signed with the given
@@ -39,23 +48,12 @@ const createJwt = (projectId, privateKeyFile, algorithm) => {
 
 const litListen = (
   deviceId,
-  registryId,
-  projectId,
-  region,
-  algorithm,
   privateKeyFile,
-  mqttBridgeHostname,
-  mqttBridgePort,
 ) => {
   // [START iot_mqtt_run]
 
   // const deviceId = `myDevice`;
-  // const registryId = `myRegistry`;
-  // const region = `us-central1`;
-  // const algorithm = `RS256`;
   // const privateKeyFile = `./rsa_private.pem`;
-  // const mqttBridgeHostname = `mqtt.googleapis.com`;
-  // const mqttBridgePort = 8883;
 
   // The mqttClientId is a unique string that identifies this device. For Google
   // Cloud IoT Core, it must be in the format below.
@@ -106,16 +104,28 @@ const litListen = (
 
   client.on('message', (topic, message) => {
     let messageStr = 'Message received: ';
+    const data = Buffer.from(message, 'base64').toString('ascii');
     if (topic === `/devices/${deviceId}/config`) {
       messageStr = 'Config message received: ';
     } else if (topic.startsWith(`/devices/${deviceId}/commands`)) {
       if (topic.startsWith(`/devices/${deviceId}/commands/effects`)) {
         messageStr = 'Effect message received: ';
+        const effectMsg = JSON.parse(data);
+        const effect = effectMsg.effect;
+        const args = effectMsg.args;
+        const properties = effectMsg.properties;
+        lit.start_effect(effect, args, properties, function(data, error) {
+          if(error) {
+              console.log("Lit error starting " + effect + " ("+JSON.stringify(args)+"): " + error);
+          } else {
+              console.log(`Lit response: ${JSON.stringify(data)}`);
+          }
+        })
       } else {
         messageStr = 'Unknown command received: ';
       }
     }
-    messageStr += Buffer.from(message, 'base64').toString('ascii');
+    messageStr += data
     console.log(messageStr);
   });
 
@@ -128,25 +138,6 @@ const litListen = (
 
 const { argv } = require('yargs')
   .options({
-    projectId: {
-      default: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT,
-      description:
-        'The Project ID to use. Defaults to the value of the GCLOUD_PROJECT or GOOGLE_CLOUD_PROJECT environment variables.',
-      requiresArg: true,
-      type: 'string',
-    },
-    cloudRegion: {
-      default: 'us-central1',
-      description: 'GCP cloud region.',
-      requiresArg: true,
-      type: 'string',
-    },
-    registryId: {
-      description: 'Cloud IoT registry ID.',
-      requiresArg: true,
-      demandOption: true,
-      type: 'string',
-    },
     deviceId: {
       description: 'Cloud IoT device ID.',
       requiresArg: true,
@@ -159,59 +150,21 @@ const { argv } = require('yargs')
       demandOption: true,
       type: 'string',
     },
-    algorithm: {
-      description: 'Encryption algorithm to generate the JWT.',
-      requiresArg: true,
-      demandOption: true,
-      choices: ['RS256', 'ES256'],
-      type: 'string',
-    },
-    tokenExpMins: {
-      default: 20,
-      description: 'Minutes to JWT token expiration.',
-      requiresArg: true,
-      type: 'number',
-    },
-    mqttBridgeHostname: {
-      default: 'mqtt.googleapis.com',
-      description: 'MQTT bridge hostname.',
-      requiresArg: true,
-      type: 'string',
-    },
-    mqttBridgePort: {
-      default: 8883,
-      description: 'MQTT bridge port.',
-      requiresArg: true,
-      type: 'number',
-    },
   })
   .command(
     'litListen',
     'Listen for commands',
     {
-      messageType: {
-        default: 'events',
-        description: 'Message type to publish.',
-        requiresArg: true,
-        choices: ['events', 'state'],
-        type: 'string',
-      },
     },
     opts => {
       litListen(
         opts.deviceId,
-        opts.registryId,
-        opts.projectId,
-        opts.cloudRegion,
-        opts.algorithm,
         opts.privateKeyFile,
-        opts.mqttBridgeHostname,
-        opts.mqttBridgePort
       );
     }
   )
   .example(
-    'node $0 litListen --projectId=blue-jet-123 \\\n\t--registryId=my-registry --deviceId=my-node-device \\\n\t--privateKeyFile=../rsa_private.pem --algorithm=RS256 \\\n\t--cloudRegion=us-central1 \\\n'
+    'node $0 litListen --deviceId=my-node-device --privateKeyFile=../rsa_private.pem'
   )
   .wrap(120)
   .recommendCommands()
